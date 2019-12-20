@@ -1,0 +1,143 @@
+#coding:utf-8
+import re, requests,time, datetime
+from lxml import etree
+from bs4 import BeautifulSoup
+import proxy_horocn_ip
+from MongoTools import MongoUtils
+import Field_setting
+from Xpath_setting import Xpath_dict
+
+module_list = ["primaryInfo","shareholderInfo","personInfo","branchGroupInfo","neRecItemInfos",
+               "bankForNow","altInfo","needPaging_guaranty","needPaging_pledge","needPaging_copyright",
+               "trademarkInfo","annual_menu_table","needPaging_change","needPaging_instantLicensing",
+               "needPaging_insPunishment"]
+
+class PageDetailParse(object):
+    '''详情页解析
+    '''
+    def __init__(self, pagesource, company_name):
+        self.selector = etree.HTML(pagesource)
+        self.company_name = company_name
+        self.info_list = {}
+
+    def page_source_parse(self):
+        # module_list.remove("branchGroupInfo")
+        # module_list.remove("bankForNow")
+        for g in module_list:
+            if g == "primaryInfo":
+                # 匹配基本工商信息
+                primary_info = {}
+                for i in range(1,20):
+                    res = self.selector.xpath(Xpath_dict[g].format(i)).replace("\n", "").replace("\t", "")\
+                                                          .replace("\r", "").replace(" ", "")
+                    field = self.selector.xpath(Xpath_dict[g + "_field"].format(i)).replace("\n", "").replace("\t", "")\
+                                                          .replace("\r", "").replace(" ", "").replace("：","")
+                    if not field:
+                        continue
+                    primary_info[field] = res
+                self.info_list["_id"] = self.company_name
+                self.info_list[f'{g}'] = primary_info
+            else:
+                # 处理主要人员信息
+                if g == "personInfo":
+                    i = 1
+                    order_dict = []
+                    if not self.selector.xpath(Xpath_dict[g].format(1, 1)):
+                        self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(1, 1))
+                    else:
+                        while self.selector.xpath(Xpath_dict[g].format(i, 1)):
+                            tem_dict = {}
+                            for j in range(1,100):
+                                if not self.selector.xpath(Xpath_dict[g].format(i, j)):
+                                    break
+                                res = self.selector.xpath(Xpath_dict[g].format(i, j))
+                                pos = self.selector.xpath(Xpath_dict["position"].format(i, j))
+                                if is_contain_chinese(res):
+                                    res = re.sub('[A-Za-z0-9.]',"",res)
+                                tem_dict["姓名"] = res
+                                tem_dict["职位"] = pos
+                            order_dict.append(tem_dict)
+                            i = i + 1
+                        self.info_list[f'{g}'] = order_dict
+                elif g == "branchGroupInfo":
+                    i = 1
+                    order_dict = []
+                    while True:
+                        if "暂无" in self.selector.xpath(Xpath_dict[g].format(i)):
+                            self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(i))
+                            break
+                        tem_dict = {}
+                        try:
+                            res = self.selector.xpath(Xpath_dict[g].format(i))
+                            print(res)
+                            res_list = res.split("· ")
+                            print(res_list)
+                            field1 = res_list[1].split(" :")  # 信用代码/注册码
+                            field2 = res_list[2].split(" :")  # 登记机关
+                            tem_dict["公司名称"] = res_list[0]
+                            tem_dict[field1[0]] = field1[1]
+                            tem_dict[field2[0]] = field2[1]
+                            order_dict.append(tem_dict)
+                            i = i + 1
+                        except:
+                            break
+                    self.info_list[f'{g}'] = order_dict
+                # 处理其他模块信息
+                elif "暂无" in self.selector.xpath(Xpath_dict[g].format(1, 1)):
+                    self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(1, 1))
+                else:
+                    i = 1
+                    order_dict = []
+                    while self.selector.xpath(Xpath_dict[g].format(i, 1)):
+                        tem_dict = {}
+                        for j in range(1,13):
+                            res = self.selector.xpath(Xpath_dict[g].format(i, j))
+                            field = self.selector.xpath(Xpath_dict[g + "_field"].format(j))
+                            if not field:
+                                break
+                            # 获取数据内容需要点击“更多”展开的全部内容
+                            elif field == "许可内容" and self.selector.xpath(Xpath_dict[g + "_div"].format(i, j)):
+                                res = self.selector.xpath(Xpath_dict[g + "_div"].format(i, j))
+                                res = str(res).replace("收起","")
+                            elif field in ["股东类型","变更事项","发起人类型"]:
+                                res = re.sub('[A-Za-z0-9.]',"",res) # 去掉数字和字母
+                                res = res.replace("=","").replace("+","")
+                            # 同上
+                            elif field == "变更前内容":
+                                if self.selector.xpath(Xpath_dict[g + "_Be"].format("All", i - 1)):
+                                    res = self.selector.xpath(Xpath_dict[g + "_Be"].format( "All", i - 1))
+                                else:
+                                    res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                            elif field == "变更后内容":
+                                if self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1)):
+                                    res = self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
+                                else:
+                                    res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                            tem_dict[field] = res
+                        order_dict.append(tem_dict)
+                        i = i + 1
+                    self.info_list[f'{g}'] = order_dict
+        # 存库
+        mongo = MongoUtils("CompanyInfo")
+        mongo.insert(self.info_list)
+        mongo.close()
+        print("企业数据存库成功")
+        # return self.info_list
+
+def is_contain_chinese(check_str):
+    """
+    判断字符串中是否包含中文
+    :param check_str: {str} 需要检测的字符串
+    :return: {bool} 包含返回True， 不包含返回False
+    """
+    for ch in check_str:
+        if u'\u4e00' <= ch <= u'\u9fff':
+            return True
+    return False
+
+if __name__ == "__main__":
+    # parse = PageDetailParse(pagesource, "耐克体育（中国）有限公司")
+    # print(parse.page_source_parse())
+    selector = etree.HTML(pagesource)
+    res = selector.xpath('string(//*[@id="branchGroupForAll"]/li[1])')
+    print(res)
