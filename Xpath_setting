@@ -1,0 +1,51 @@
+# {}表示数据顺序,用具体数字代替{}
+Xpath_dict = {
+# 营业执照信息
+"primaryInfo":'string(//*[@id="primaryInfo"]/div/div[@class="overview"]/dl[{}]/dd)',
+"primaryInfo_field" : 'string(//*[@id="primaryInfo"]/div/div[@class="overview"]/dl[{}]/dt)',
+# 股东出资信息
+"shareholderInfo" : 'string(//*[@id="shareholderInfo"]/tbody/tr[{}]/td[{}])',
+"shareholderInfo_field" : 'string(//*[@id="shareholderInfo"]/thead/tr/th[{}])',
+# 主要人员信息
+"personInfo" : 'string(//*[@id="personInfo"]/ul/li[{}]/a/div[{}])',
+"position" : 'string(//*[@id="personInfo"]/ul/li[{}]/a/div[{}]/span/img)', # 职位以图片表示，匹配不到数据
+# 企业涉税风险检测(分支机构信息)
+"branchGroupInfo" : 'string(//*[@id="branchGroupForAll"]/li[{}])',  # 结果用split处理两次，分别得到每行数据
+
+# “多证合一”信息公示
+"neRecItemInfos" : 'string(//*[@id="neRecItemInfos"]/tbody/tr[{}]/td[{}])',
+"neRecItemInfos_field" : 'string(//*[@id="neRecItemInfos"]/thead/tr/th[{}])',
+# 清算信息
+"bankForNow" : 'string(//*[@id="bankForNow"]/tr[{}]/td[{}])',
+# 变更信息
+"altInfo" : 'string(//*[@id="altInfo"]/tbody/tr[{}]/td[{}])',
+"altInfo_Be" : 'string(//*[@id="altInfoBe{}Data{}"]/span)', # 变更前内容匹配,包含展开按钮
+"altInfo_Af" : 'string(//*[@id="altInfoAf{}Data{}"]/span)', # 变更后内容匹配，包含展开按钮
+"altInfo_All" : 'string(//*[@id="altInfo"]/tbody/tr[{}]/td[{}])', # 变更前后内容匹配，没有展开按钮
+"altInfo_field" : 'string(//*[@id="altInfo"]/thead/tr/th[{}])',
+# 动产抵押登记信息
+"needPaging_guaranty" : 'string(//*[@id="needPaging_guaranty"]/tbody/tr[{}]/td[{}])',
+"needPaging_guaranty_field" : 'string(//*[@id="needPaging_guaranty"]/thead/tr/th[{}])',
+# 股权出质登记信息
+"needPaging_pledge" : 'string(//*[@id="needPaging_pledge"]/tbody/tr[{}]/td[{}])',
+"needPaging_pledge_field" : 'string(//*[@id="needPaging_pledge"]/thead/tr/th/div/table/thead/tr/th[{}])',
+# 知识产权出质信息
+"needPaging_copyright" : 'string(//*[@id="needPaging_copyright"]/tbody/tr[{}]/td[{}])',
+"needPaging_copyright_field" : 'string(//*[@id="copyright_baseinfo"]/thead/tr/th[{}])',
+# 商标注册信息
+"trademarkInfo" : 'string(//*[@id="trademarkInfo"]/ul/tr/td)',
+# 企业年报信息
+"annual_menu_table" : 'string(//*[@id="annual_menu_table"]/tbody/tr[{}]/td[{}])',
+"annual_menu_table_field" : 'string(//*[@id="annual_menu_table"]/thead/tr/th[{}])',
+# 股权变更信息
+"needPaging_change" : 'string(//*[@id="needPaging_change"]/tbody/tr[{}]/td[{}])',
+"needPaging_change_field" : 'string(//*[@id="needPaging_change"]/thead/tr/th[{}])',
+# 行政许可证信息
+"needPaging_instantLicensing" : 'string(//*[@id="needPaging_instantLicensing"]/tbody/tr[{}]/td[{}])',
+"needPaging_instantLicensing_div" : 'string(//*[@id="needPaging_instantLicensing"]/tbody/tr[{}]/td[{}]/div[2])',
+"needPaging_instantLicensing_field" : 'string(//*[@id="needPaging_instantLicensing"]/thead/tr/th[{}])',
+# 行政处罚信息
+# "needPaging_insPunishment" : 'string(//*[@id="needPaging_insPunishment"]/tbody/tr[{}]/td[{}])',
+"needPaging_insPunishment" : 'string(//*[@id="needPaging_insPunishment"]/tbody/tr[{}]/td/div/table/tbody/tr/td[{}])',
+"needPaging_insPunishment_field" : 'string(//*[@id="needPaging_insPunishment"]/thead/tr/th/div/table/thead/tr/th[{}])'
+}
