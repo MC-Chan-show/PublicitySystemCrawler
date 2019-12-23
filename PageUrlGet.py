@@ -11,36 +11,10 @@ from hashlib import md5
 from lxml import etree
 from PIL import Image
 from io import BytesIO
-import execjs
-from SQL_tools import Mysql_tools
-from RandomIPGet import Random_IP
+import execjs,xlrd
 
 
-class SearchResultParse(object):
-    '''查询结果页解析
-    '''
-    def __init__(self, pagesource, base_url, parse_rule=None):
-        self.selector = etree.HTML(pagesource)
-        self.url_list = []
-        self.base_url = base_url
-        self.parse_rule = '//*[@id="advs"]/div/div[2]/a/@href'  # self.parse_rule = '//*[@id="advs"]/div/div[2]/a/@href'
-
-    def search_result_parse(self):
-        self.url_list = [self.base_url + i for i in self.selector.xpath(self.parse_rule)]
-        # 返回搜索结果第一个URL
-        return self.url_list
-
-class MaxEnterError(Exception):
-    '''输入关键字最大尝试次数
-    '''
-
-    def __init__(self, ErrorInfo):
-        super().__init__(self)  # 初始化父类
-        self.errorinfo = ErrorInfo
-
-    def __str__(self):
-        return self.errorinfo
-
+# 超级鹰接口
 class GtClickShot(object):
     def __init__(self, username, password, soft_id):
         '''初始化超级鹰
@@ -90,6 +64,46 @@ class GtClickShot(object):
         params.update(self.base_params)
         r = requests.post('http://upload.chaojiying.net/Upload/ReportError.php', data=params, headers=self.headers)
         return r.json()
+
+class SearchResultParse(object):
+    '''查询结果页解析
+    '''
+    def __init__(self, pagesource, base_url, parse_rule):
+        self.selector = etree.HTML(pagesource)
+        self.url_list = []
+        self.base_url = base_url
+        self.parse_rule = parse_rule['search_result_url']  # self.parse_rule = '//*[@id="advs"]/div/div[2]/a/@href'
+
+    def search_result_parse(self):
+        self.url_list = [self.base_url + i for i in self.selector.xpath(self.parse_rule)]
+        return self.url_list
+
+class PageDetailParse(object):
+    '''详情页解析
+    '''
+    def __init__(self, pagesource, parse_rule):
+        self.selector = etree.HTML(pagesource)
+        self.parse_rule = parse_rule
+        self.info_list = {}
+
+    def search_result_parse(self, primary_info=None):
+        if primary_info is None:
+            primary_info = []
+        for i in self.parse_rule['primaryinfo']: # 15个匹配规则
+            primary_info.append(
+                self.selector.xpath(i).replace("\n", "").replace("\t", "").replace("\r", "").replace(" ", "")) # 提取工商数据单条原始数据做处理 （'\r\t\t\t                         企业名称：\r\t\t\t                         华为投资控股有限公司\r\t\t\t                     '）
+        self.info_list['primary_info'] = primary_info
+        return self.info_list
+
+class MaxEnterError(Exception):
+    '''输入关键字最大尝试次数
+    '''
+    def __init__(self, ErrorInfo):
+        super().__init__(self)  # 初始化父类
+        self.errorinfo = ErrorInfo
+
+    def __str__(self):
+        return self.errorinfo
 
 class CorpSearch(object):
     def __init__(self, init_url, index_url, headers, max_click):
@@ -162,7 +176,7 @@ class CorpSearch(object):
             if self.max_entertimes == 0:
                 raise MaxEnterError('---Out of max times on the search enter---')
             # 避免网速过慢时页面还未加载，报错
-            self.wait.until(lambda driver: driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind"))
+            time.sleep(2)
             gt_panel = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind") # css_selector定位
             style_value = gt_panel.value_of_css_property("display")
             if style_value.strip() == "block":
@@ -234,78 +248,6 @@ class CorpSearch(object):
         after_screenshot = self.get_screenshot()
         after_img = after_screenshot.crop(position)
         after_img.save("after_click.png")
-
-    # 获取缺口位置，计算滑动距离（灰度化，求差值，阈值去燥，计算缺口位置，计算滑动距离）
-    def get_slide_distance(self):
-
-        '''获取滑动距离
-        return:
-            返回滑动距离
-        '''
-
-        befor_click_img = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\befor_click.png"
-        after_click_path = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\after_click.png"
-        befor_img = cv2.imread(befor_click_img)
-        after_img = cv2.imread(after_click_path)
-
-        befor_gray = cv2.cvtColor(befor_img, cv2.COLOR_BGR2GRAY)
-        after_gray = cv2.cvtColor(after_img, cv2.COLOR_BGR2GRAY)
-        img_diff = np.array(befor_gray) - np.array(after_gray)
-
-        height, width = img_diff.shape
-
-        for i in range(height):
-            for j in range(width):
-                if img_diff[i][j] > 245 or img_diff[i][j] < 60:
-                    img_diff[i][j] = 0
-
-        start_position = random.choice([4, 5, 6])
-        reshape_img = img_diff.T
-        sum_color = list(map(lambda x: sum(x), reshape_img))
-        for i in range(1, len(sum_color)):
-            if sum_color[i] > 1000 and i > 60:
-                end_position = i
-                break
-
-        slide_distance = end_position - start_position
-        return slide_distance
-
-    # 模拟鼠标轨迹，按照开始慢加速（2），中间快加速（5），后面慢加速（2），最后慢减速的方式（1）
-    # 返回值是x值与Y值坐标以及sleep时间截点，起始中间最后都要sleep
-    def get_track(self, distance, track_list=None):
-
-        '''获取滑动轨迹
-        args:
-            distance:滑动距离
-        kargs:
-            Track_list:滑动轨迹，初始化为空
-        return:
-            滑动轨迹，断点位置(2处)
-        '''
-
-        if track_list is None:
-            track_list = []
-        base = distance / 10
-        x1 = round(base * 2)
-        x2 = round(base * 5)
-        x3 = x1
-        x4 = distance - x1 - x2 - x3
-        ynoise_num = random.randint(5, 10)
-        y1 = [random.randint(-2, 2) for _ in range(ynoise_num)]
-        yrdm = list(set(random.choice(range(distance)) for _ in range(ynoise_num)))
-        x = [1] * distance
-        y = [0] * distance
-        for i, j in enumerate(yrdm):
-            y[j] = y1[i]
-        t1 = sorted([random.randint(8, 13) / 1000 for _ in range(x1)], reverse=True)
-        t2 = sorted([random.randint(1, 8) / 1000 for _ in range(x2)], reverse=True)
-        t3 = sorted([random.randint(8, 13) / 1000 for _ in range(x3)], reverse=True)
-        t4 = sorted([random.randint(12, 20) / 1000 for _ in range(x4)])
-        t = t1 + t2 + t3 + t4
-
-        for i in (zip(x, y, t)):
-            track_list.append(i)
-        return (track_list, x1 + x2, x1 + x2 + x3)
 
     # 对于点击验证码，获取验证码的校验文字和待点击图片截图,以及验证码弹框元素
     def get_click_images(self):
@@ -406,6 +348,8 @@ class CorpSearch(object):
         return:
             仅仅用于方法返回
         '''
+        # 每次验证时初始化action对象，避免之前存储的action造成错误操作
+        self.action = ActionChains(self.driver)
         click_img, tip_img, click_img_element = self.get_click_images()
         bytes_array = BytesIO()
         click_img.save(bytes_array, format="PNG")
@@ -415,15 +359,7 @@ class CorpSearch(object):
         if groups == "":
             raise RuntimeError("打码超时")
         pic_id = coord_result.get("pic_id")
-
         points = [[int(num) for num in group.split(',')] for group in groups]
-
-        #        tip_img_path="D:\\Anaconda3\\Lib\\captcha\\gt_validate\\tip_img.png"
-        #        click_img_path="D:\\Anaconda3\\Lib\\captcha\\gt_validate\\click_img.png"
-
-        #        num=self.cal_char_num(tip_img_path)
-        #        points=self.char_absolute_coord(click_img_path,num)
-
         mouse_track = self.get_offset_coord(points)
         self.action.move_to_element_with_offset(click_img_element, 0, 0)
         for position in mouse_track:
@@ -437,28 +373,6 @@ class CorpSearch(object):
         click_submit_btn.click()
         self.action.reset_actions()
         self.valide_process(pic_id=pic_id)
-        return
-
-    # 验证滑动验证码，获取滑动距离和滑动轨迹，分别在起始，中间，结束时随机停顿
-    def slide_captcha_validate(self):
-
-        '''滑动验证码验证
-        return:
-            仅仅用于方法返回
-        '''
-
-        self.get_slide_images()
-        distance = self.get_slide_distance()
-        track, p1, p2 = self.get_track(distance)
-        time.sleep(random.randint(3, 7) / 10)
-        for i, j in enumerate(track):
-            if i == p1 or i == p2:
-                time.sleep(random.randint(3, 7) / 10)
-            self.action.move_by_offset(j[0], j[1])
-            time.sleep(j[2])
-        time.sleep(random.randint(3, 7) / 10)
-        self.action.release()
-        self.valide_process()
         return
 
     # 验证是否成功破解，设置重启机制
@@ -486,24 +400,25 @@ class CorpSearch(object):
             WebDriverWait(self.driver, 10).until(EC.visibility_of_element_located((By.ID, "advs")))
             print("Validate Successful")
             return
-        except TimeoutException:
+        except:
             try:
                 gt_panel_error = self.driver.find_element_by_css_selector(
-                    "body > div.geetest_panel.geetest_wind > div.geetest_panel_box > div.geetest_panel_error")
+                    "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick> div.geetest_panel_error")
                 error_display = gt_panel_error.value_of_css_property("display")
 
                 if error_display.strip() == "block":
-                    gt_panel_error_content = self.driver.find_element_by_css_selector(
-                        ".geetest_panel_error > div.geetest_panel_error_content")
-                    self.action.move_to_element(gt_panel_error_content).click().perform()
-                    self.action.reset_actions()
+                    # 实现点击重试，但文字验证码没有重试按钮
+                    # gt_panel_error_content = self.driver.find_element_by_css_selector(
+                    #     ".geetest_panel_error > div.geetest_panel_error_content")
+                    # self.action.move_to_element(gt_panel_error_content).click().perform()
+                    # self.action.reset_actions()
                     try:
                         WebDriverWait(self.driver, 3).until_not(
                             EC.visibility_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel")))
                         WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_id('advs').is_displayed())
                         print("Validate Successful")
                         return
-                    except TimeoutException:
+                    except:
                         self.slide_orclick_validate(pic_id)
                 else:
                     self.slide_orclick_validate(pic_id)
@@ -523,7 +438,7 @@ class CorpSearch(object):
         '''
 
         try:
-            WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, "geetest_close")))
+            WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.CLASS_NAME, "geetest_close")))
             print('Validate Failed,retry again')
             if self.is_element_exist("geetest_canvas_img"):
                 print('captcha type is slide')
@@ -535,6 +450,7 @@ class CorpSearch(object):
                 self.click_valitimes += 1
                 return self.click_captcha_validate()
         except:
+            # self.click_captcha_validate()方法出错也会输出下面语句
             print("Directly no click or slide validate")
             return
 
@@ -567,6 +483,8 @@ class CorpSearch(object):
             self.switch_hmpg()
         else:
             self.init()
+        time.sleep(2)
+        # self.action = ActionChains(self.driver)
         self.input_query(keyword)
         self.slide_orclick_validate()
 
@@ -584,6 +502,99 @@ class CorpSearch(object):
             'page': htmlpage
         }
 
+    # 验证滑动验证码，获取滑动距离和滑动轨迹，分别在起始，中间，结束时随机停顿
+    def slide_captcha_validate(self):
+
+        '''滑动验证码验证
+        return:
+            仅仅用于方法返回
+        '''
+
+        self.get_slide_images()
+        distance = self.get_slide_distance()
+        track, p1, p2 = self.get_track(distance)
+        time.sleep(random.randint(3, 7) / 10)
+        for i, j in enumerate(track):
+            if i == p1 or i == p2:
+                time.sleep(random.randint(3, 7) / 10)
+            self.action.move_by_offset(j[0], j[1])
+            time.sleep(j[2])
+        time.sleep(random.randint(3, 7) / 10)
+        self.action.release()
+        self.valide_process()
+        return
+
+    # 获取缺口位置，计算滑动距离（灰度化，求差值，阈值去燥，计算缺口位置，计算滑动距离）
+    def get_slide_distance(self):
+
+        '''获取滑动距离
+        return:
+            返回滑动距离
+        '''
+
+        befor_click_img = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\befor_click.png"
+        after_click_path = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\after_click.png"
+        befor_img = cv2.imread(befor_click_img)
+        after_img = cv2.imread(after_click_path)
+
+        befor_gray = cv2.cvtColor(befor_img, cv2.COLOR_BGR2GRAY)
+        after_gray = cv2.cvtColor(after_img, cv2.COLOR_BGR2GRAY)
+        img_diff = np.array(befor_gray) - np.array(after_gray)
+
+        height, width = img_diff.shape
+
+        for i in range(height):
+            for j in range(width):
+                if img_diff[i][j] > 245 or img_diff[i][j] < 60:
+                    img_diff[i][j] = 0
+
+        start_position = random.choice([4, 5, 6])
+        reshape_img = img_diff.T
+        sum_color = list(map(lambda x: sum(x), reshape_img))
+        for i in range(1, len(sum_color)):
+            if sum_color[i] > 1000 and i > 60:
+                end_position = i
+                break
+
+        slide_distance = end_position - start_position
+        return slide_distance
+
+    # 模拟鼠标轨迹，按照开始慢加速（2），中间快加速（5），后面慢加速（2），最后慢减速的方式（1）
+    # 返回值是x值与Y值坐标以及sleep时间截点，起始中间最后都要sleep
+    def get_track(self, distance, track_list=None):
+
+        '''获取滑动轨迹
+        args:
+            distance:滑动距离
+        kargs:
+            Track_list:滑动轨迹，初始化为空
+        return:
+            滑动轨迹，断点位置(2处)
+        '''
+
+        if track_list is None:
+            track_list = []
+        base = distance / 10
+        x1 = round(base * 2)
+        x2 = round(base * 5)
+        x3 = x1
+        x4 = distance - x1 - x2 - x3
+        ynoise_num = random.randint(5, 10)
+        y1 = [random.randint(-2, 2) for _ in range(ynoise_num)]
+        yrdm = list(set(random.choice(range(distance)) for _ in range(ynoise_num)))
+        x = [1] * distance
+        y = [0] * distance
+        for i, j in enumerate(yrdm):
+            y[j] = y1[i]
+        t1 = sorted([random.randint(8, 13) / 1000 for _ in range(x1)], reverse=True)
+        t2 = sorted([random.randint(1, 8) / 1000 for _ in range(x2)], reverse=True)
+        t3 = sorted([random.randint(8, 13) / 1000 for _ in range(x3)], reverse=True)
+        t4 = sorted([random.randint(12, 20) / 1000 for _ in range(x4)])
+        t = t1 + t2 + t3 + t4
+
+        for i in (zip(x, y, t)):
+            track_list.append(i)
+        return (track_list, x1 + x2, x1 + x2 + x3)
 
 if __name__ == '__main__':
     init_url = "http://www.gsxt.gov.cn/SearchItemCaptcha"
@@ -600,7 +611,7 @@ if __name__ == '__main__':
                    'Accept-Language="zh-CN,zh;q=0.9"']
 
     search = CorpSearch(init_url, index_url, chm_headers, max_click)
-    search.main("华为")
+    search.main("华为技术有限公司")
     cookie_html = search.to_dict()
     search_result = SearchResultParse(cookie_html['page'], base_url, result_parse_rule)
     url_list = search_result.search_result_parse() # 获取搜索结果的url地址
