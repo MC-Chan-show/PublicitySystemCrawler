@@ -6,26 +6,41 @@ import proxy_horocn_ip
 from MongoTools import MongoUtils
 import Field_setting
 from Xpath_setting import Xpath_dict
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from PageSourceGet import SourceGet
+from fake_useragent import UserAgent
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 
 module_list = ["primaryInfo","shareholderInfo","personInfo","branchGroupInfo","neRecItemInfos",
-               "bankForNow","altInfo","needPaging_guaranty","needPaging_pledge","needPaging_copyright",
+               "bankRuptcy","altInfo","needPaging_guaranty","needPaging_pledge","needPaging_copyright",
                "trademarkInfo","annual_menu_table","needPaging_change","needPaging_instantLicensing",
                "needPaging_insPunishment"]
 
 class PageDetailParse(object):
     '''详情页解析
     '''
-    def __init__(self, pagesource, company_name):
-        self.selector = etree.HTML(pagesource)
+    def __init__(self, driver, company_name, target_url):
+        self.selector = etree.HTML(driver.page_source)
         self.company_name = company_name
         self.info_list = {}
+        self.driver = driver
 
     def page_source_parse(self):
         # module_list.remove("branchGroupInfo")
         # module_list.remove("bankForNow")
+        # 以模块循环
         for g in module_list:
+            # 判断是否具有基本工商信息
+            if not self.selector.xpath('string(//*[@id="primaryInfo"]/div/div[1])'):
+                self.info_list["_id"] = self.company_name
+                self.info_list["统一社会信用代码"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/span[1]/span')
+                self.info_list["成立日期"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/span[3]/span')
+                self.info_list["登记状态"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/div/span[1]')
+                break
+            # 匹配基本工商信息
             if g == "primaryInfo":
-                # 匹配基本工商信息
                 primary_info = {}
                 for i in range(1,20):
                     res = self.selector.xpath(Xpath_dict[g].format(i)).replace("\n", "").replace("\t", "")\
@@ -47,36 +62,51 @@ class PageDetailParse(object):
                     else:
                         while self.selector.xpath(Xpath_dict[g].format(i, 1)):
                             tem_dict = {}
-                            for j in range(1,100):
-                                if not self.selector.xpath(Xpath_dict[g].format(i, j)):
-                                    break
-                                res = self.selector.xpath(Xpath_dict[g].format(i, j))
-                                pos = self.selector.xpath(Xpath_dict["position"].format(i, j))
-                                if is_contain_chinese(res):
-                                    res = re.sub('[A-Za-z0-9.]',"",res)
-                                tem_dict["姓名"] = res
-                                tem_dict["职位"] = pos
+                            # for j in range(1,100):
+                            #     if not self.selector.xpath(Xpath_dict[g].format(i, j)):
+                            #         break
+                            res = self.selector.xpath(Xpath_dict[g].format(i, 1))
+                            pos = self.selector.xpath(Xpath_dict["position"].format(i, 2))
+                            if is_contain_chinese(res):
+                                res = re.sub('[A-Za-z0-9.]',"",res)
+                            tem_dict["姓名"] = res
+                            tem_dict["职位"] = pos
                             order_dict.append(tem_dict)
                             i = i + 1
                         self.info_list[f'{g}'] = order_dict
+                # 处理分支机构信息
                 elif g == "branchGroupInfo":
                     i = 1
                     order_dict = []
-                    while True:
-                        if "暂无" in self.selector.xpath(Xpath_dict[g].format(i)):
-                            self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(i))
-                            break
+                    if "暂无" in self.selector.xpath('string(//*[@id="branchGroupForAll"]/tr/td[{}])'.format(i)):
+                        self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(i))
+                    else:
+                        while self.selector.xpath(Xpath_dict[g].format(i)):
+                            tem_dict = {}
+                            try:
+                                res = self.selector.xpath(Xpath_dict[g].format(i))
+                                res_list = res.split("· ")
+                                field1 = res_list[1].split(" :")  # 信用代码/注册码
+                                field2 = res_list[2].split(" :")  # 登记机关
+                                tem_dict["公司名称"] = res_list[0]
+                                tem_dict[field1[0]] = field1[1]
+                                tem_dict[field2[0]] = field2[1]
+                                order_dict.append(tem_dict)
+                                i = i + 1
+                            except:
+                                break
+                    self.info_list[f'{g}'] = order_dict
+                # 处理清算信息
+                elif g == "bankRuptcy":
+                    i = 1
+                    order_dict = []
+                    if "暂无" in self.selector.xpath('string(//*[@id="bankForNow"]/tr/td[{}])'.format(i)):
+                        self.info_list[f'{g}'] = self.selector.xpath('string(//*[@id="bankForNow"]/tr/td[{}])'.format(i))
+                    while self.selector.xpath(Xpath_dict[g].format(i)):
                         tem_dict = {}
                         try:
                             res = self.selector.xpath(Xpath_dict[g].format(i))
-                            print(res)
-                            res_list = res.split("· ")
-                            print(res_list)
-                            field1 = res_list[1].split(" :")  # 信用代码/注册码
-                            field2 = res_list[2].split(" :")  # 登记机关
-                            tem_dict["公司名称"] = res_list[0]
-                            tem_dict[field1[0]] = field1[1]
-                            tem_dict[field2[0]] = field2[1]
+                            tem_dict[i] = res
                             order_dict.append(tem_dict)
                             i = i + 1
                         except:
@@ -86,39 +116,89 @@ class PageDetailParse(object):
                 elif "暂无" in self.selector.xpath(Xpath_dict[g].format(1, 1)):
                     self.info_list[f'{g}'] = self.selector.xpath(Xpath_dict[g].format(1, 1))
                 else:
-                    i = 1
                     order_dict = []
-                    while self.selector.xpath(Xpath_dict[g].format(i, 1)):
-                        tem_dict = {}
-                        for j in range(1,13):
-                            res = self.selector.xpath(Xpath_dict[g].format(i, j))
-                            field = self.selector.xpath(Xpath_dict[g + "_field"].format(j))
-                            if not field:
-                                break
-                            # 获取数据内容需要点击“更多”展开的全部内容
-                            elif field == "许可内容" and self.selector.xpath(Xpath_dict[g + "_div"].format(i, j)):
-                                res = self.selector.xpath(Xpath_dict[g + "_div"].format(i, j))
-                                res = str(res).replace("收起","")
-                            elif field in ["股东类型","变更事项","发起人类型"]:
-                                res = re.sub('[A-Za-z0-9.]',"",res) # 去掉数字和字母
-                                res = res.replace("=","").replace("+","")
-                            # 同上
-                            elif field == "变更前内容":
-                                if self.selector.xpath(Xpath_dict[g + "_Be"].format("All", i - 1)):
-                                    res = self.selector.xpath(Xpath_dict[g + "_Be"].format( "All", i - 1))
-                                else:
-                                    res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
-                            elif field == "变更后内容":
-                                if self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1)):
-                                    res = self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
-                                else:
-                                    res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
-                            tem_dict[field] = res
-                        order_dict.append(tem_dict)
-                        i = i + 1
+                    try:
+                        page_info = self.selector.xpath(Xpath_dict[g + "_info"])
+                        page_num = re.findall("\d+", page_info)[1]
+                    except:
+                        page_num = "0"
+                    if page_num not in ["0", "1", ""]:
+                        for p in range(1, int(page_num) + 1):
+                            i = 1
+                            # 判断翻页后是否加载完毕
+                            while True:
+                                gt_panel_error = self.driver.find_element_by_xpath(
+                                '//*[@id="altInfo_processing"]')
+                                error_display = gt_panel_error.value_of_css_property("display")
+                                if error_display.strip() == "none":
+                                    break
+                            # 获取翻页后的数据页面
+                            single_page = self.driver.page_source
+                            page_selector = etree.HTML(single_page)
+                            while page_selector.xpath(Xpath_dict[g].format(i, 1)):
+                                tem_dict = {}
+                                for j in range(1, 13):
+                                    res = page_selector.xpath(Xpath_dict[g].format(i, j))
+                                    field = page_selector.xpath(Xpath_dict[g + "_field"].format(j))
+                                    if not field:
+                                        break
+                                    # 获取数据内容需要点击“更多”展开的全部内容
+                                    elif field == "许可内容" and page_selector.xpath(Xpath_dict[g + "_div"].format(i, j)):
+                                        res = page_selector.xpath(Xpath_dict[g + "_div"].format(i, j))
+                                        res = str(res).replace("收起", "")
+                                    elif field in ["股东类型", "变更事项", "发起人类型"]:
+                                        res = re.sub('[A-Za-z0-9.]', "", res)  # 去掉数字和字母
+                                        res = res.replace("=", "").replace("+", "")
+                                    # 同上
+                                    elif field == "变更前内容":
+                                        if page_selector.xpath(Xpath_dict[g + "_Be"].format("All", i - 1)):
+                                            res = page_selector.xpath(Xpath_dict[g + "_Be"].format("All", i - 1))
+                                        else:
+                                            res = page_selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                    elif field == "变更后内容":
+                                        if page_selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1)):
+                                            res = page_selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
+                                        else:
+                                            res = page_selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                    tem_dict[field] = res
+                                order_dict.append(tem_dict)
+                                i = i + 1
+                            # 翻页操作
+                            self.driver.find_element_by_id(g + "_next").click()
+                        self.driver.quit()
+                    else:
+                        i = 1
+                        while self.selector.xpath(Xpath_dict[g].format(i, 1)):
+                            tem_dict = {}
+                            for j in range(1,13):
+                                res = self.selector.xpath(Xpath_dict[g].format(i, j))
+                                field = self.selector.xpath(Xpath_dict[g + "_field"].format(j))
+                                if not field:
+                                    break
+                                # 获取数据内容需要点击“更多”展开的全部内容
+                                elif field == "许可内容" and self.selector.xpath(Xpath_dict[g + "_div"].format(i, j)):
+                                    res = self.selector.xpath(Xpath_dict[g + "_div"].format(i, j))
+                                    res = str(res).replace("收起","")
+                                elif field in ["股东类型","变更事项","发起人类型"]:
+                                    res = re.sub('[A-Za-z0-9.]',"",res) # 去掉数字和字母
+                                    res = res.replace("=","").replace("+","")
+                                # 同上
+                                elif field == "变更前内容":
+                                    if self.selector.xpath(Xpath_dict[g + "_Be"].format("All", i - 1)):
+                                        res = self.selector.xpath(Xpath_dict[g + "_Be"].format( "All", i - 1))
+                                    else:
+                                        res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                elif field == "变更后内容":
+                                    if self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1)):
+                                        res = self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
+                                    else:
+                                        res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                tem_dict[field] = res
+                            order_dict.append(tem_dict)
+                            i = i + 1
                     self.info_list[f'{g}'] = order_dict
         # 存库
-        mongo = MongoUtils("CompanyInfo")
+        mongo = MongoUtils("CompanyInfo_test")
         mongo.insert(self.info_list)
         mongo.close()
         print("企业数据存库成功")
@@ -134,10 +214,3 @@ def is_contain_chinese(check_str):
         if u'\u4e00' <= ch <= u'\u9fff':
             return True
     return False
-
-if __name__ == "__main__":
-    # parse = PageDetailParse(pagesource, "耐克体育（中国）有限公司")
-    # print(parse.page_source_parse())
-    selector = etree.HTML(pagesource)
-    res = selector.xpath('string(//*[@id="branchGroupForAll"]/li[1])')
-    print(res)
