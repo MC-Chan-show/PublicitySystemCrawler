@@ -1,11 +1,12 @@
 import PageSourceGet, PageSourceParse, PageUrlGet
 from fake_useragent import UserAgent
-import time, random, xlrd, datetime
+import time, random, xlrd, datetime, signal
 
 
 init_url = "http://www.gsxt.gov.cn/SearchItemCaptcha"
 index_url = "http://www.gsxt.gov.cn/index.html"
 base_url = 'http://www.gsxt.gov.cn'
+result_parse_rule = {'search_result_url': '//*[@id="advs"]/div/div[2]/a/@href'}
 max_click = 10
 chm_headers = ['Host="www.gsxt.gov.cn"',
                'Connection="keep-alive"',
@@ -15,31 +16,34 @@ chm_headers = ['Host="www.gsxt.gov.cn"',
                'Accept-Encoding="gzip, deflate"',
                'Accept-Language="zh-CN,zh;q=0.9"']
 search = PageUrlGet.CorpSearch(init_url, index_url, chm_headers, max_click)
-
-book = xlrd.open_workbook(r"C:\Users\zengc\Desktop\company_list.xlsx")
+# book = xlrd.open_workbook(r"C:\Users\zengc\Desktop\diyipi.xls")
+book = xlrd.open_workbook(r"C:\Users\zengc\Desktop\company_name.xlsx")
 sheet = book.sheet_by_index(0)
 num = 1
 for i in range(sheet.nrows):
-    company_name = sheet.cell(i+3,0).value
+    company_name = sheet.cell(i ,0).value
     company_name = company_name.replace("(","（").replace(")","）")
-    print(str(datetime.datetime.now()) + f",{company_name}开始爬取数据")
-    search.main(company_name)
-    cookie_html = search.to_dict()
-    search_result = PageUrlGet.SearchResultParse(cookie_html['page'], base_url)
-    target_url = search_result.search_result_parse()  # 获取搜索结果的url地址
-    if not target_url:
-        print("未搜索到该企业")
-        exit(0)
-    target_url = target_url[0]
-    print("目标公司URL已拿到")
-    PSG = PageSourceGet.SourceGet(target_url)
-    page_source = PSG.run()
-    parse = PageSourceParse.PageDetailParse(page_source, company_name)
-    print("开始解析HTML页面数据并存库")
-    parse.page_source_parse()
-    print(str(datetime.datetime.now()) + f",{i}数据爬取完成")
-    time.sleep(random.randint(150, 300)/10)
+    print(str(datetime.datetime.now()) + f",开始爬取 {company_name} 数据")
+    try:
+        search.main(company_name)
+        driver = search.detail_page()
+        source_get = PageSourceGet.SourceGet(driver)
+        source_driver, windows_list = source_get.run()
+        parse = PageSourceParse.PageDetailParse(source_driver, company_name)
+        print("开始解析HTML页面数据并存库")
+        parse.page_source_parse(windows_list)
+    except Exception as e:
+        with open(r"C:\Users\zengc\Desktop\error_company.txt", "a" , encoding='utf-8') as f:
+            f.write(company_name)
+            f.write("\n")
+        print("{}搜索异常".format(company_name))
+        print("异常原因：{}".format(e))
+        continue
+    print(str(datetime.datetime.now()) + f",{company_name}数据爬取完成")
     num = num + 1
-    if num > 20:
-        print("爬虫结束")
-        break
+    # if num > 3:
+    #     print("已爬取{}家企业数据，爬虫结束！".format(num))
+    #     break
+    time.sleep(random.randint(8, 15) / 10)
+
+print("共爬取{}家企业数据，爬虫结束！".format(num))
