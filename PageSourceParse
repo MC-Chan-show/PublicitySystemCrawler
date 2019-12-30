@@ -2,9 +2,7 @@
 import re, requests,time, datetime
 from lxml import etree
 from bs4 import BeautifulSoup
-import proxy_horocn_ip
 from MongoTools import MongoUtils
-import Field_setting
 from Xpath_setting import Xpath_dict
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -12,6 +10,7 @@ from PageSourceGet import SourceGet
 from fake_useragent import UserAgent
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+import timeout_decorator
 
 module_list = ["primaryInfo","shareholderInfo","personInfo","branchGroupInfo","neRecItemInfos",
                "bankRuptcy","altInfo","needPaging_guaranty","needPaging_pledge","needPaging_copyright",
@@ -21,20 +20,19 @@ module_list = ["primaryInfo","shareholderInfo","personInfo","branchGroupInfo","n
 class PageDetailParse(object):
     '''详情页解析
     '''
-    def __init__(self, driver, company_name, target_url):
+    def __init__(self, driver, company_name, target_url=None):
         self.selector = etree.HTML(driver.page_source)
         self.company_name = company_name
         self.info_list = {}
         self.driver = driver
 
-    def page_source_parse(self):
-        # module_list.remove("branchGroupInfo")
-        # module_list.remove("bankForNow")
+    @timeout_decorator.timeout(40)
+    def page_source_parse(self, windows_list):
+        self.info_list["_id"] = self.company_name
         # 以模块循环
         for g in module_list:
             # 判断是否具有基本工商信息
             if not self.selector.xpath('string(//*[@id="primaryInfo"]/div/div[1])'):
-                self.info_list["_id"] = self.company_name
                 self.info_list["统一社会信用代码"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/span[1]/span')
                 self.info_list["成立日期"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/span[3]/span')
                 self.info_list["登记状态"] = self.selector.xpath('/html/body/div[5]/div[4]/div[2]/div[2]/div[4]/div[2]/div/span[1]')
@@ -50,7 +48,6 @@ class PageDetailParse(object):
                     if not field:
                         continue
                     primary_info[field] = res
-                self.info_list["_id"] = self.company_name
                 self.info_list[f'{g}'] = primary_info
             else:
                 # 处理主要人员信息
@@ -68,7 +65,7 @@ class PageDetailParse(object):
                             res = self.selector.xpath(Xpath_dict[g].format(i, 1))
                             pos = self.selector.xpath(Xpath_dict["position"].format(i, 2))
                             if is_contain_chinese(res):
-                                res = re.sub('[A-Za-z0-9.]',"",res)
+                                res = re.sub('[A-Za-z0-9.+]',"",res)
                             tem_dict["姓名"] = res
                             tem_dict["职位"] = pos
                             order_dict.append(tem_dict)
@@ -127,8 +124,7 @@ class PageDetailParse(object):
                             i = 1
                             # 判断翻页后是否加载完毕
                             while True:
-                                gt_panel_error = self.driver.find_element_by_xpath(
-                                '//*[@id="altInfo_processing"]')
+                                gt_panel_error = self.driver.find_element_by_xpath('//*[@id="altInfo_processing"]')
                                 error_display = gt_panel_error.value_of_css_property("display")
                                 if error_display.strip() == "none":
                                     break
@@ -160,12 +156,14 @@ class PageDetailParse(object):
                                             res = page_selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
                                         else:
                                             res = page_selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                    elif g == "needPaging_pledge" and field == "证照/证件号码":
+                                        if field in tem_dict.keys():
+                                            field = field + "_质权人"
                                     tem_dict[field] = res
                                 order_dict.append(tem_dict)
                                 i = i + 1
                             # 翻页操作
                             self.driver.find_element_by_id(g + "_next").click()
-                        self.driver.quit()
                     else:
                         i = 1
                         while self.selector.xpath(Xpath_dict[g].format(i, 1)):
@@ -193,12 +191,18 @@ class PageDetailParse(object):
                                         res = self.selector.xpath(Xpath_dict[g + "_Af"].format("All", i - 1))
                                     else:
                                         res = self.selector.xpath(Xpath_dict[g + "_All"].format(i, j))
+                                elif g == "needPaging_pledge" and field == "证照/证件号码":
+                                    if field in tem_dict.keys():
+                                        field = field + "_质权人"
                                 tem_dict[field] = res
                             order_dict.append(tem_dict)
                             i = i + 1
                     self.info_list[f'{g}'] = order_dict
         # 存库
-        mongo = MongoUtils("CompanyInfo_test")
+        # mongo = MongoUtils("CompanyInfo_test")
+        self.driver.close()
+        self.driver.switch_to.window(windows_list[0])
+        mongo = MongoUtils("CompanyInfo")
         mongo.insert(self.info_list)
         mongo.close()
         print("企业数据存库成功")
