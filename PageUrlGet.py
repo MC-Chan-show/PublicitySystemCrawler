@@ -65,36 +65,6 @@ class GtClickShot(object):
         r = requests.post('http://upload.chaojiying.net/Upload/ReportError.php', data=params, headers=self.headers)
         return r.json()
 
-class SearchResultParse(object):
-    '''查询结果页解析
-    '''
-    def __init__(self, pagesource, base_url, parse_rule):
-        self.selector = etree.HTML(pagesource)
-        self.url_list = []
-        self.base_url = base_url
-        self.parse_rule = parse_rule['search_result_url']  # self.parse_rule = '//*[@id="advs"]/div/div[2]/a/@href'
-
-    def search_result_parse(self):
-        self.url_list = [self.base_url + i for i in self.selector.xpath(self.parse_rule)]
-        return self.url_list
-
-class PageDetailParse(object):
-    '''详情页解析
-    '''
-    def __init__(self, pagesource, parse_rule):
-        self.selector = etree.HTML(pagesource)
-        self.parse_rule = parse_rule
-        self.info_list = {}
-
-    def search_result_parse(self, primary_info=None):
-        if primary_info is None:
-            primary_info = []
-        for i in self.parse_rule['primaryinfo']: # 15个匹配规则
-            primary_info.append(
-                self.selector.xpath(i).replace("\n", "").replace("\t", "").replace("\r", "").replace(" ", "")) # 提取工商数据单条原始数据做处理 （'\r\t\t\t                         企业名称：\r\t\t\t                         华为投资控股有限公司\r\t\t\t                     '）
-        self.info_list['primary_info'] = primary_info
-        return self.info_list
-
 class MaxEnterError(Exception):
     '''输入关键字最大尝试次数
     '''
@@ -125,18 +95,21 @@ class CorpSearch(object):
             }
         }
         chrome_options.add_experimental_option("prefs", prefs)
+        chrome_options.add_argument("--start-maximized")
         self.init_url = init_url
         self.index_url = index_url
         if platform.system() == "Windows":
+            chrome_options.add_argument("--headless")  # 隐藏浏览器
+            chrome_options.add_argument('--no-sandbox')  # 解决DevToolsActivePort文件不存在的报错
             self.driver = webdriver.Chrome('chromedriver.exe', chrome_options=chrome_options)
         elif platform.system() == "Linux":
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument("--headless") # 隐藏浏览器
+            chrome_options.add_argument('--disable-gpu') # 谷歌文档提到需要加上这个属性来规避bug
+            chrome_options.add_argument('--no-sandbox')  # 解决DevToolsActivePort文件不存在的报错
             self.driver = webdriver.Chrome(
                 executable_path="/usr/bin/chromedriver",
                 chrome_options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 50)
+        self.wait = WebDriverWait(self.driver, 120)
         self.max_entertimes = max_click
         self.click_valitimes = 0
         self.action = ActionChains(self.driver)
@@ -159,32 +132,42 @@ class CorpSearch(object):
     # 加载首页，输入查询关键词，点击查询按钮
     # 如果点击按钮失效,自动重新回车，并设定最大回车次数，一旦超过设定值，抛出异常，结束程序
     def input_query(self, keyword):
-
         '''输入关键词进行查询
         args:
             keyword:查询关键词
         return:
             仅用于方法返回
         '''
-        enter_word = self.wait.until(EC.presence_of_element_located((By.ID, "keyword"))) # 判断某个元素是否被加到了dom树里（通过css解析器构建出样式表规则将这些规则分别放到对应的DOM树节点上，得到一颗带有样式属性的DOM树。）
-        self.wait.until(EC.presence_of_element_located((By.ID, "btn_query")))
-        time.sleep(random.randint(8, 15) / 10)
-        enter_word.send_keys(keyword)
-        time.sleep(random.randint(5, 10) / 10)
-        enter_word.send_keys(Keys.ENTER)
+        # 搜索偶尔出现回车后页面自动刷新，需重新填入数据
         while True:
+            try:
+                enter_word = self.wait.until(EC.presence_of_element_located((By.ID, "keyword"))) # 判断某个元素是否被加到了dom树里，定位搜索框元素（通过css解析器构建出样式表规则将这些规则分别放到对应的DOM树节点上，得到一颗带有样式属性的DOM树。）
+                self.wait.until(EC.presence_of_element_located((By.ID, "btn_query"))) # 直到查询确认元素加载完毕
+                time.sleep(random.randint(5, 10) / 10)
+                enter_word.send_keys(keyword)
+                time.sleep(random.randint(5, 10) / 10)
+                enter_word.send_keys(Keys.ENTER)
+            except:
+                continue
+            # 判断按回车搜索后是否出现验证弹框
             if self.max_entertimes == 0:
                 raise MaxEnterError('---Out of max times on the search enter---')
-            # 避免网速过慢时页面还未加载，报错
-            time.sleep(2)
-            gt_panel = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind") # css_selector定位
-            style_value = gt_panel.value_of_css_property("display")
+            # self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel.geetest_wind")))
+            try:
+                gt_panel = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind") # css_selector定位
+            except:
+                continue
+            style_value = gt_panel.value_of_css_property("display") # 获取css样式中属性值
             if style_value.strip() == "block":
                 break
-            else:
-                enter_word.send_keys(Keys.ENTER)
-                time.sleep(random.randint(1, 5) / 10)
-                self.max_entertimes -= 1
+            # else:
+            #     # 重新进行搜索操作
+            #     # enter_word.send_keys(keyword)
+            #     # time.sleep(random.randint(8, 15) / 10)
+            #     self.wait.until(EC.presence_of_element_located((By.ID, "btn_query")))
+            #     enter_word.send_keys(Keys.ENTER)
+            #     time.sleep(random.randint(1, 5) / 10)
+            #     self.max_entertimes -= 1
         return
 
     # 判断页面中是否包含某个元素，注意是class_name
@@ -348,7 +331,6 @@ class CorpSearch(object):
         return:
             仅仅用于方法返回
         '''
-        # 每次验证时初始化action对象，避免之前存储的action造成错误操作
         self.action = ActionChains(self.driver)
         click_img, tip_img, click_img_element = self.get_click_images()
         bytes_array = BytesIO()
@@ -403,7 +385,8 @@ class CorpSearch(object):
         except:
             try:
                 gt_panel_error = self.driver.find_element_by_css_selector(
-                    "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick> div.geetest_panel_error")
+                    # "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick> div.geetest_panel_error")
+                    "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick")
                 error_display = gt_panel_error.value_of_css_property("display")
 
                 if error_display.strip() == "block":
@@ -423,8 +406,8 @@ class CorpSearch(object):
                 else:
                     self.slide_orclick_validate(pic_id)
 
-            except:
-                print('error occured')
+            except Exception as e:
+                print('error occured:{}'.format(e))
                 return
 
     # 判断是执行点击还是滑块
@@ -446,6 +429,7 @@ class CorpSearch(object):
             else:
                 print('captcha type is click')
                 if self.click_valitimes > 0:
+                    # 返回错误验证码ID返回积分
                     self.gt_shot.ReportError(pic_id)
                 self.click_valitimes += 1
                 return self.click_captcha_validate()
@@ -483,7 +467,7 @@ class CorpSearch(object):
             self.switch_hmpg()
         else:
             self.init()
-        time.sleep(2)
+        time.sleep(random.randint(7,10) / 10)
         # self.action = ActionChains(self.driver)
         self.input_query(keyword)
         self.slide_orclick_validate()
@@ -501,6 +485,19 @@ class CorpSearch(object):
         return {
             'page': htmlpage
         }
+
+    # 进入详情页
+    def detail_page(self):
+        selector = etree.HTML(self.driver.page_source)
+        if selector.xpath('string(//*[@id="advs"]/div/div[1]/span)') not in ["0",""]:
+            time.sleep(random.randint(5,10)/10)
+            # self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="advs"]/div/div[2]/a[1]/h1')))
+            element = self.driver.find_element_by_xpath('//*[@id="advs"]/div/div[2]/a[1]/h1')
+            self.driver.execute_script("arguments[0].click();", element)
+            time.sleep(1)
+            return self.driver
+        else:
+            return 0
 
     # 验证滑动验证码，获取滑动距离和滑动轨迹，分别在起始，中间，结束时随机停顿
     def slide_captcha_validate(self):
@@ -595,25 +592,3 @@ class CorpSearch(object):
         for i in (zip(x, y, t)):
             track_list.append(i)
         return (track_list, x1 + x2, x1 + x2 + x3)
-
-if __name__ == '__main__':
-    init_url = "http://www.gsxt.gov.cn/SearchItemCaptcha"
-    index_url = "http://www.gsxt.gov.cn/index.html"
-    base_url = 'http://www.gsxt.gov.cn'
-    result_parse_rule = {'search_result_url': '//*[@id="advs"]/div/div[2]/a/@href'}
-    max_click = 10
-    chm_headers = ['Host="www.gsxt.gov.cn"',
-                   'Connection="keep-alive"',
-                   'User-Agent={}'.format(UserAgent().random),
-                   'Upgrade-Insecure-Requests=1',
-                   'Accept="text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"',
-                   'Accept-Encoding="gzip, deflate"',
-                   'Accept-Language="zh-CN,zh;q=0.9"']
-
-    search = CorpSearch(init_url, index_url, chm_headers, max_click)
-    search.main("华为技术有限公司")
-    cookie_html = search.to_dict()
-    search_result = SearchResultParse(cookie_html['page'], base_url, result_parse_rule)
-    url_list = search_result.search_result_parse() # 获取搜索结果的url地址
-    print(type(url_list))
-    print(url_list)
