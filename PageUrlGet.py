@@ -11,7 +11,47 @@ from hashlib import md5
 from lxml import etree
 from PIL import Image
 from io import BytesIO
-import execjs,xlrd
+import execjs,xlrd, cv2, random
+import numpy as np
+from PIL import ImageFont
+from PIL import Image
+from PIL import ImageDraw
+import easing,random_ip
+# import timeout_decorator
+
+# 初始滑块验证码左边界
+BORDER_1 = 5
+BORDER_2 = 15
+BORDER_3 = 28
+
+class SearchResultParse(object):
+    '''查询结果页解析
+    '''
+    def __init__(self, pagesource, base_url, parse_rule):
+        self.selector = etree.HTML(pagesource)
+        self.url_list = []
+        self.base_url = base_url
+        self.parse_rule = parse_rule['search_result_url']  # self.parse_rule = '//*[@id="advs"]/div/div[2]/a/@href'
+    def search_result_parse(self):
+        self.url_list = [self.base_url + i for i in self.selector.xpath(self.parse_rule)]
+        return self.url_list
+
+class PageDetailParse(object):
+    '''详情页解析
+    '''
+    def __init__(self, pagesource, parse_rule):
+        self.selector = etree.HTML(pagesource)
+        self.parse_rule = parse_rule
+        self.info_list = {}
+
+    def search_result_parse(self, primary_info=None):
+        if primary_info is None:
+            primary_info = []
+        for i in self.parse_rule['primaryinfo']: # 15个匹配规则
+            primary_info.append(
+                self.selector.xpath(i).replace("\n", "").replace("\t", "").replace("\r", "").replace(" ", "")) # 提取工商数据单条原始数据做处理 （'\r\t\t\t                         企业名称：\r\t\t\t                         华为投资控股有限公司\r\t\t\t                     '）
+        self.info_list['primary_info'] = primary_info
+        return self.info_list
 
 
 # 超级鹰接口
@@ -96,41 +136,51 @@ class CorpSearch(object):
         }
         chrome_options.add_experimental_option("prefs", prefs)
         chrome_options.add_argument("--start-maximized")
+
         self.init_url = init_url
         self.index_url = index_url
         if platform.system() == "Windows":
             chrome_options.add_argument("--headless")  # 隐藏浏览器
             chrome_options.add_argument('--no-sandbox')  # 解决DevToolsActivePort文件不存在的报错
-            self.driver = webdriver.Chrome('chromedriver.exe', chrome_options=chrome_options)
+            self.driver = webdriver.Chrome('chromedriver.exe', options=chrome_options)
         elif platform.system() == "Linux":
             chrome_options.add_argument("--headless") # 隐藏浏览器
             chrome_options.add_argument('--disable-gpu') # 谷歌文档提到需要加上这个属性来规避bug
             chrome_options.add_argument('--no-sandbox')  # 解决DevToolsActivePort文件不存在的报错
             self.driver = webdriver.Chrome(
                 executable_path="/usr/bin/chromedriver",
-                chrome_options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 120)
+                options=chrome_options)
+        self.wait = WebDriverWait(self.driver, 50)
+        self.mainWindow = ""
         self.max_entertimes = max_click
         self.click_valitimes = 0
+        self.now_num = 3
+        self.flesh_num = 1
+        self.try_num = 3
+        self.num = 1
+        self.success = False
         self.action = ActionChains(self.driver)
-        self.gt_shot = GtClickShot("zc3653", "123456", "902761")   # 超级鹰账号密码
+        self.gt_shot = GtClickShot("*****", "*******", "*******")   # 超级鹰账号密码
         self.options = webdriver.ChromeOptions()
         self.headers = headers
         for option in self.headers:
             self.options.add_argument(option)
 
     # 初始化页面，绕过过加速乐反爬，获取gt和challenge,并加载进入首页
+    # @timeout_decorator.timeout(30)
     def init(self):
 
         '''
         请求初始化网站，并进入首页
         '''
         self.driver.get(self.init_url)
-        self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > pre:nth-child(1)")))
+        # self.mainWindow = self.driver.current_window_handle
+        self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > pre:nth-child(1)")),message="请求初始化网站出错")
         self.driver.get(self.index_url)
 
     # 加载首页，输入查询关键词，点击查询按钮
     # 如果点击按钮失效,自动重新回车，并设定最大回车次数，一旦超过设定值，抛出异常，结束程序
+    # @timeout_decorator.timeout(40)
     def input_query(self, keyword):
         '''输入关键词进行查询
         args:
@@ -139,35 +189,38 @@ class CorpSearch(object):
             仅用于方法返回
         '''
         # 搜索偶尔出现回车后页面自动刷新，需重新填入数据
+        num = 3
         while True:
             try:
-                enter_word = self.wait.until(EC.presence_of_element_located((By.ID, "keyword"))) # 判断某个元素是否被加到了dom树里，定位搜索框元素（通过css解析器构建出样式表规则将这些规则分别放到对应的DOM树节点上，得到一颗带有样式属性的DOM树。）
-                self.wait.until(EC.presence_of_element_located((By.ID, "btn_query"))) # 直到查询确认元素加载完毕
-                time.sleep(random.randint(5, 10) / 10)
+                enter_word = self.wait.until(EC.presence_of_element_located((By.ID, "keyword")), message="搜索框未加载完毕") # 判断某个元素是否被加到了dom树里，定位搜索框元素（通过css解析器构建出样式表规则将这些规则分别放到对应的DOM树节点上，得到一颗带有样式属性的DOM树。）
+                self.wait.until(EC.presence_of_element_located((By.ID, "btn_query")),message="搜索按钮未加载完毕") # 查询按钮加载完毕
+                time.sleep(random.randint(4, 8) / 10)
                 enter_word.send_keys(keyword)
-                time.sleep(random.randint(5, 10) / 10)
+                time.sleep(random.randint(4, 8) / 10)
                 enter_word.send_keys(Keys.ENTER)
-            except:
-                continue
+            #    continue
             # 判断按回车搜索后是否出现验证弹框
-            if self.max_entertimes == 0:
-                raise MaxEnterError('---Out of max times on the search enter---')
-            # self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel.geetest_wind")))
-            try:
+                if self.max_entertimes == 0:
+                    raise MaxEnterError('---Out of max times on the search enter---')
+                self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel.geetest_wind")), message="验证码窗口未弹出")
                 gt_panel = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind") # css_selector定位
-            except:
-                continue
-            style_value = gt_panel.value_of_css_property("display") # 获取css样式中属性值
+                style_value = gt_panel.value_of_css_property("display") # 获取css样式中属性值
+            except Exception as e:
+                if num - 1 > 0:
+                    print("刷新")
+                    self.driver.refresh()
+                    num = num - 1
+                    continue
+                else:
+                    raise TimeoutError(e)
             if style_value.strip() == "block":
                 break
-            # else:
-            #     # 重新进行搜索操作
-            #     # enter_word.send_keys(keyword)
-            #     # time.sleep(random.randint(8, 15) / 10)
-            #     self.wait.until(EC.presence_of_element_located((By.ID, "btn_query")))
-            #     enter_word.send_keys(Keys.ENTER)
-            #     time.sleep(random.randint(1, 5) / 10)
-            #     self.max_entertimes -= 1
+            elif num - 1 > 0:
+                print("刷新")
+                self.driver.refresh()
+                num = num - 1
+            else:
+                raise EOFError("搜索异常")
         return
 
     # 判断页面中是否包含某个元素，注意是class_name
@@ -194,9 +247,12 @@ class CorpSearch(object):
             返回截图
         '''
 
-        screenshot = self.driver.get_screenshot_as_png()
-        screenshot = Image.open(BytesIO(screenshot))
-        return screenshot
+        # screenshot = self.driver.get_screenshot_as_png()
+        # screenshot = Image.open(BytesIO(screenshot))
+        # return screenshot
+        self.driver.save_screenshot('snap.png')
+        page_snap_obj = Image.open('snap.png')
+        return page_snap_obj
 
     # 获取验证验证码图片的位置，用于裁图
     def get_position(self, pos_img):
@@ -219,18 +275,18 @@ class CorpSearch(object):
 
         '''获取有缺口和没缺口的图片
         '''
-        canvas_img = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".geetest_canvas_img.geetest_absolute > div")))
+        # if os.path.exists("befor_click.png"):
+        #     os.remove("befor_click.png")
+        # canvas_img = self.wait.until(
+            # EC.presence_of_element_located((By.CSS_SELECTOR, ".geetest_canvas_img.geetest_absolute > div")))
+            # EC.presence_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowslide > div.geetest_panel_next > div > div.geetest_wrap > div.geetest_widget > div > a > div.geetest_canvas_img.geetest_absolute > div > canvas.geetest_canvas_slice.geetest_absolute")))
+        canvas_img = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'geetest_canvas_img')))
+        time.sleep(0.3)
         position = self.get_position(canvas_img)
         befor_screenshot = self.get_screenshot()
         befor_img = befor_screenshot.crop(position)
         befor_img.save("befor_click.png")
-
-        btn_slide = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "geetest_slider_button")))
-        self.action.click_and_hold(btn_slide).perform()
-        after_screenshot = self.get_screenshot()
-        after_img = after_screenshot.crop(position)
-        after_img.save("after_click.png")
+        return befor_img
 
     # 对于点击验证码，获取验证码的校验文字和待点击图片截图,以及验证码弹框元素
     def get_click_images(self):
@@ -324,13 +380,18 @@ class CorpSearch(object):
 
     # 验证点击验证码,获取验证码数量，人工点击，按照计算的坐标相对偏移位置，依次点击文字进行验证
     # 通过打码平台，将验证码图片发送后返回坐标信息，通过超级鹰打码平台
-    def click_captcha_validate(self):
+    def click_captcha_validate(self, pic_id=None):
 
         '''根据打码平台返回的坐标进行验证
 
         return:
             仅仅用于方法返回
         '''
+        if self.click_valitimes > 0 and pic_id:
+            # 返回错误验证码ID返回积分
+            print("返回错误验证码ID:{}".format(pic_id))
+            self.gt_shot.ReportError(pic_id)
+        self.click_valitimes += 1
         self.action = ActionChains(self.driver)
         click_img, tip_img, click_img_element = self.get_click_images()
         bytes_array = BytesIO()
@@ -340,7 +401,7 @@ class CorpSearch(object):
         groups = coord_result.get("pic_str").split('|')
         if groups == "":
             raise RuntimeError("打码超时")
-        pic_id = coord_result.get("pic_id")
+        pic_id_new = coord_result.get("pic_id")
         points = [[int(num) for num in group.split(',')] for group in groups]
         mouse_track = self.get_offset_coord(points)
         self.action.move_to_element_with_offset(click_img_element, 0, 0)
@@ -354,21 +415,13 @@ class CorpSearch(object):
         click_submit_btn = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'geetest_commit_tip')))
         click_submit_btn.click()
         self.action.reset_actions()
-        self.valide_process(pic_id=pic_id)
+        self.valide_process(pic_id=pic_id_new)
         return
 
     # 验证是否成功破解，设置重启机制
     # 超过最大验证次数需点击“点击此处重试”
-    def valide_process(self, pic_id=None):
-
+    def valide_process(self, pic_id=None, validate_type = None, company_name=None):
         '''验证过程
-        1>判断极验弹框消失且查询结果框出现，验证成功，结束验证；
-        2>第一步验证失败，超时；
-        3>超时原因：极验验证框没消失(跳转至第4步)或查询结果框没出现(跳转至第6步)；
-        4>极验验证框没消失，检验是否超过最大验证次数，如果是，需点击重试，跳至第7步，如果不是，跳至第5步；
-        5>如果不是，判断验证类型，调用响应验证方法，跳至第1步；
-        6>如果查询结果框没出现，直接退出关闭浏览器；
-        7>点击重试时，如果是空白响应则退出浏览器，或者判断验证类型，调用响应验证方法，跳至第1步。
         args:
             cap_type:验证码类型
             pic_id:点击类验证码图片id
@@ -377,41 +430,40 @@ class CorpSearch(object):
         '''
 
         try:
-            WebDriverWait(self.driver, 3).until_not(
+            WebDriverWait(self.driver, 5).until_not(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel")))  # EC方法判断某个元素是否可见. 可见代表元素非隐藏
             WebDriverWait(self.driver, 10).until(EC.visibility_of_element_located((By.ID, "advs")))
-            print("Validate Successful")
+            print("验证通过！")
             return
         except:
             try:
-                gt_panel_error = self.driver.find_element_by_css_selector(
-                    # "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick> div.geetest_panel_error")
-                    "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick")
-                error_display = gt_panel_error.value_of_css_property("display")
-
-                if error_display.strip() == "block":
-                    # 实现点击重试，但文字验证码没有重试按钮
-                    # gt_panel_error_content = self.driver.find_element_by_css_selector(
-                    #     ".geetest_panel_error > div.geetest_panel_error_content")
-                    # self.action.move_to_element(gt_panel_error_content).click().perform()
-                    # self.action.reset_actions()
-                    try:
-                        WebDriverWait(self.driver, 3).until_not(
-                            EC.visibility_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel")))
-                        WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_id('advs').is_displayed())
-                        print("Validate Successful")
-                        return
-                    except:
-                        self.slide_orclick_validate(pic_id)
+                if validate_type == "slide":
+                    gt_panel_error = self.driver.find_element_by_css_selector(
+                        "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowslide > div.geetest_panel_next")
                 else:
-                    self.slide_orclick_validate(pic_id)
-
+                    gt_panel_error = self.driver.find_element_by_css_selector(
+                        "body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowclick")
+                error_display = gt_panel_error.value_of_css_property("display")
+                if error_display.strip() == "block" and validate_type == "slide":
+                    if self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowslide > div.geetest_panel_next > div > div.geetest_wrap > div.geetest_slider.geetest_ready > div.geetest_slider_track > div"):
+                        refresh = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind > div.geetest_panel_box.geetest_panelshowslide > div.geetest_panel_next > div > div.geetest_panel > div > a.geetest_refresh_1")
+                        # 控制滑块验证次数
+                        if self.num > 3:
+                            raise Exception("验证码异常。")
+                        print("验证码第{}次尝试破解".format(self.num))
+                        refresh.click()
+                        self.num = self.num + 1
+                        self.slide_captcha_validate(company_name)
+                elif error_display.strip() == "block":
+                    self.click_captcha_validate(pic_id=pic_id)
+                else:
+                    raise Exception("验证出错。")
             except Exception as e:
-                print('error occured:{}'.format(e))
+                print('发生异常，记录企业名称')
                 return
 
     # 判断是执行点击还是滑块
-    def slide_orclick_validate(self, pic_id=None):
+    def slide_orclick_validate(self, pic_id=None,company_name=None):
 
         '''判断下一步是选择滑动验证还是点击验证还是退出浏览器
         args:
@@ -419,26 +471,21 @@ class CorpSearch(object):
         return:
             要么滑动验证，要么点击验证，要么None
         '''
-
-        try:
-            WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.CLASS_NAME, "geetest_close")))
-            print('Validate Failed,retry again')
-            if self.is_element_exist("geetest_canvas_img"):
-                print('captcha type is slide')
-                return self.slide_captcha_validate()
-            else:
-                print('captcha type is click')
-                if self.click_valitimes > 0:
-                    # 返回错误验证码ID返回积分
-                    self.gt_shot.ReportError(pic_id)
-                self.click_valitimes += 1
-                return self.click_captcha_validate()
-        except:
-            # self.click_captcha_validate()方法出错也会输出下面语句
-            print("Directly no click or slide validate")
-            return
+        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "geetest_close")),message="验证框加载过慢")
+        if self.is_element_exist("geetest_canvas_img"):
+            print('执行滑块验证')
+            return self.slide_captcha_validate(company_name)
+        else:
+            print('执行语义点击验证')
+            # if self.click_valitimes > 0:
+            #     # 返回错误验证码ID返回积分
+            #     print("返回错误验证码ID:{}".format(pic_id))
+            #     self.gt_shot.ReportError(pic_id)
+            # self.click_valitimes += 1
+            return self.click_captcha_validate()
 
     # 带cookie切换至首页继续检索
+    # @timeout_decorator.timeout(30)
     def switch_hmpg(self):
 
         '''由结果页切换至首页
@@ -467,10 +514,11 @@ class CorpSearch(object):
             self.switch_hmpg()
         else:
             self.init()
-        time.sleep(random.randint(7,10) / 10)
+        # time.sleep(random.randint(7,10) / 10)
         # self.action = ActionChains(self.driver)
         self.input_query(keyword)
-        self.slide_orclick_validate()
+        self.slide_orclick_validate(company_name=keyword)
+        self.num = 1
 
     # 保存cookie和检索结果，用于requests及详情解析
     def to_dict(self):
@@ -494,101 +542,139 @@ class CorpSearch(object):
             # self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="advs"]/div/div[2]/a[1]/h1')))
             element = self.driver.find_element_by_xpath('//*[@id="advs"]/div/div[2]/a[1]/h1')
             self.driver.execute_script("arguments[0].click();", element)
-            time.sleep(1)
+            time.sleep(0.7)
             return self.driver
         else:
-            return 0
+            raise EOFError("未搜索到该公司")
 
     # 验证滑动验证码，获取滑动距离和滑动轨迹，分别在起始，中间，结束时随机停顿
-    def slide_captcha_validate(self):
+    def slide_captcha_validate(self,company_name=None):
 
         '''滑动验证码验证
         return:
             仅仅用于方法返回
         '''
-
-        self.get_slide_images()
-        distance = self.get_slide_distance()
-        track, p1, p2 = self.get_track(distance)
-        time.sleep(random.randint(3, 7) / 10)
-        for i, j in enumerate(track):
-            if i == p1 or i == p2:
-                time.sleep(random.randint(3, 7) / 10)
-            self.action.move_by_offset(j[0], j[1])
-            time.sleep(j[2])
-        time.sleep(random.randint(3, 7) / 10)
-        self.action.release()
-        self.valide_process()
+        before = self.get_slide_images()
+        image = Image.open("befor_click.png")
+        image = image.convert("RGB")
+        left_list = []
+        left_list = self.get_gap(image)
+        x_max = image.size[0]
+        left_list = sorted(left_list, key=lambda x: abs(x[1] - int(x_max / 6.45)))
+        if not left_list:
+            raise EOFError("未获取到滑块位移值")
+        distance = left_list[0][0]
+        self.slider_try(distance, BORDER_1)
+        self.valide_process(validate_type="slide", company_name=company_name)
         return
 
-    # 获取缺口位置，计算滑动距离（灰度化，求差值，阈值去燥，计算缺口位置，计算滑动距离）
-    def get_slide_distance(self):
+    def get_gap(self, image):
+        """
+        获取缺口偏移量
+        :param image: 带缺口图片
+        :return:
+        """
+        # left_list保存所有符合条件的x轴坐标
+        left_list = []
+        # 我们需要获取的是凹槽的x轴坐标，就不需要遍历所有y轴，遍历几个等分点就行
+        for i in [10 * i for i in range(1, int(image.size[1] / 11))]:
+            # x轴从x为image.size[0]/5.16的像素点开始遍历，因为凹槽不会在x轴为50以内
+            for j in range(int(image.size[0] / 5.16), image.size[0] - int(image.size[0] / 8.6)):
+                if self.is_pixel_equal(image, j, i, left_list):
+                    break
+        return left_list
 
-        '''获取滑动距离
-        return:
-            返回滑动距离
-        '''
+    def is_pixel_equal(self, image, x, y, left_list):
+        """
+        判断两个像素是否相同
+        :param image: 图片
+        :param x: 位置x
+        :param y: 位置y
+        :return: 像素是否相同
+        """
+        # 取两个图片的像素点
+        pixel1 = image.load()[x, y]
+        threshold = 150
+        # count记录一次向右有多少个像素点R、G、B都是小于150的
+        count = 0
+        # 如果该点的R、G、B都小于150，就开始向右遍历，记录向右有多少个像素点R、G、B都是小于150的
+        if pixel1[0] < threshold and pixel1[1] < threshold and pixel1[2] < threshold:
+            for i in range(x + 1, image.size[0]):
+                piexl = image.load()[i, y]
+                if piexl[0] < threshold and piexl[1] < threshold and piexl[2] < threshold:
+                    count += 1
+                else:
+                    break
+        if int(image.size[0] / 8.6) < count < int(image.size[0] / 4.3):
+            left_list.append((x, count))
+            return True
+        else:
+            return False
 
-        befor_click_img = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\befor_click.png"
-        after_click_path = "F:\\Anaconda3\\Lib\\captcha\\gt_validate\\after_click.png"
-        befor_img = cv2.imread(befor_click_img)
-        after_img = cv2.imread(after_click_path)
+    def slider_try(self, gap, BORDER):
+        if self.now_num:
+            # 减去缺口位置
+            gap = gap - BORDER
+            # 计算滑动距离
+            track = self.get_track(int(gap))
+            # offsets, track = easing.get_tracks(gap, 5, 'ease_out_quart')
+            track.extend([2,1,-2,-1])
+            print(track)
+            # 拖动滑块
+            slider = self.get_slider()
+            self.move_to_gap(slider, track, gap)
 
-        befor_gray = cv2.cvtColor(befor_img, cv2.COLOR_BGR2GRAY)
-        after_gray = cv2.cvtColor(after_img, cv2.COLOR_BGR2GRAY)
-        img_diff = np.array(befor_gray) - np.array(after_gray)
+    def move_to_gap(self, slider, track, gap=None):
+        """
+        拖动滑块到缺口处
+        :param slider: 滑块
+        :param track: 轨迹
+        :return:
+        """
+        self.action = ActionChains(self.driver)
+        self.action.click_and_hold(slider).perform()
+        for x in track:
+            self.action.move_by_offset(xoffset=x, yoffset=0).perform()
+            #
+            self.action = ActionChains(self.driver)
+        self.action.pause(random.randint(6, 10) / 10).release().perform()
 
-        height, width = img_diff.shape
-
-        for i in range(height):
-            for j in range(width):
-                if img_diff[i][j] > 245 or img_diff[i][j] < 60:
-                    img_diff[i][j] = 0
-
-        start_position = random.choice([4, 5, 6])
-        reshape_img = img_diff.T
-        sum_color = list(map(lambda x: sum(x), reshape_img))
-        for i in range(1, len(sum_color)):
-            if sum_color[i] > 1000 and i > 60:
-                end_position = i
-                break
-
-        slide_distance = end_position - start_position
-        return slide_distance
+    def get_slider(self):
+        """
+        获取滑块
+        :return: 滑块对象
+        """
+        try:
+            slider = self.wait.until(EC.element_to_be_clickable((By.CLASS_NAME, 'geetest_slider_button')))
+        except Exception:
+            # self.crack()
+            return
+        return slider
 
     # 模拟鼠标轨迹，按照开始慢加速（2），中间快加速（5），后面慢加速（2），最后慢减速的方式（1）
     # 返回值是x值与Y值坐标以及sleep时间截点，起始中间最后都要sleep
     def get_track(self, distance, track_list=None):
-
         '''获取滑动轨迹
         args:
             distance:滑动距离
         kargs:
             Track_list:滑动轨迹，初始化为空
         return:
-            滑动轨迹，断点位置(2处)
+            滑动轨迹
         '''
-
-        if track_list is None:
-            track_list = []
-        base = distance / 10
-        x1 = round(base * 2)
-        x2 = round(base * 5)
-        x3 = x1
-        x4 = distance - x1 - x2 - x3
-        ynoise_num = random.randint(5, 10)
-        y1 = [random.randint(-2, 2) for _ in range(ynoise_num)]
-        yrdm = list(set(random.choice(range(distance)) for _ in range(ynoise_num)))
-        x = [1] * distance
-        y = [0] * distance
-        for i, j in enumerate(yrdm):
-            y[j] = y1[i]
-        t1 = sorted([random.randint(8, 13) / 1000 for _ in range(x1)], reverse=True)
-        t2 = sorted([random.randint(1, 8) / 1000 for _ in range(x2)], reverse=True)
-        t3 = sorted([random.randint(8, 13) / 1000 for _ in range(x3)], reverse=True)
-        t4 = sorted([random.randint(12, 20) / 1000 for _ in range(x4)])
-        t = t1 + t2 + t3 + t4
-
-        for i in (zip(x, y, t)):
-            track_list.append(i)
-        return (track_list, x1 + x2, x1 + x2 + x3)
+        track = []
+        current = 0
+        mid = distance * 4 / 5
+        t = random.randint(2, 3) / 10
+        v = 0
+        while current < distance:
+            if current < mid:
+                a = 10
+            else:
+                a = -5
+            v0 = v
+            v = v0 + a * t
+            move = v0 * t + 1 / 2 * a * t * t
+            current += move
+            track.append(round(move))
+        return track
