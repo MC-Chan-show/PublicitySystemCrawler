@@ -11,7 +11,7 @@ from hashlib import md5
 from lxml import etree
 from PIL import Image
 from io import BytesIO
-import execjs,xlrd, cv2, random
+import execjs,xlrd, cv2, random, datetime
 import numpy as np
 from PIL import ImageFont
 from PIL import Image
@@ -189,7 +189,7 @@ class CorpSearch(object):
             仅用于方法返回
         '''
         # 搜索偶尔出现回车后页面自动刷新，需重新填入数据
-        num = 3
+        num = 2
         while True:
             try:
                 enter_word = self.wait.until(EC.presence_of_element_located((By.ID, "keyword")), message="搜索框未加载完毕") # 判断某个元素是否被加到了dom树里，定位搜索框元素（通过css解析器构建出样式表规则将这些规则分别放到对应的DOM树节点上，得到一颗带有样式属性的DOM树。）
@@ -205,6 +205,24 @@ class CorpSearch(object):
                 self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body > div.geetest_panel.geetest_wind")), message="验证码窗口未弹出")
                 gt_panel = self.driver.find_element_by_css_selector("body > div.geetest_panel.geetest_wind") # css_selector定位
                 style_value = gt_panel.value_of_css_property("display") # 获取css样式中属性值
+                start_time = datetime.datetime.now()
+                while style_value.strip() != "block":
+                    end_time = datetime.datetime.now()
+                    runtime = end_time - start_time
+                    if runtime.seconds > 5:
+                        if num > 0:
+                            print(1)
+                            print("刷新")
+                            self.driver.refresh()
+                            num = num - 1
+                            break
+                        else:
+                            raise EOFError("搜索异常，超过刷新限制次数")
+                    else:
+                        style_value = gt_panel.value_of_css_property("display")
+                        continue
+                else:
+                    break
             except Exception as e:
                 if num - 1 > 0:
                     print("刷新")
@@ -213,14 +231,6 @@ class CorpSearch(object):
                     continue
                 else:
                     raise TimeoutError(e)
-            if style_value.strip() == "block":
-                break
-            elif num - 1 > 0:
-                print("刷新")
-                self.driver.refresh()
-                num = num - 1
-            else:
-                raise EOFError("搜索异常")
         return
 
     # 判断页面中是否包含某个元素，注意是class_name
