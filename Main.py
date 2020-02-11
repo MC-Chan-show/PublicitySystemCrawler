@@ -16,8 +16,8 @@ chm_headers = ['Host="www.gsxt.gov.cn"',
                'Accept-Encoding="gzip, deflate"',
                'Accept-Language="zh-CN,zh;q=0.9"']
 search = PageUrlGet.CorpSearch(init_url, index_url, chm_headers, max_click)
-# book = xlrd.open_workbook(r"C:\Users\zengc\Desktop\diyipi.xls")
-book = xlrd.open_workbook(r"C:\Users\zengc\Desktop\company_name.xlsx")
+# book = xlrd.open_workbook(r"********")
+book = xlrd.open_workbook(r"************")
 sheet = book.sheet_by_index(0)
 num = 1
 for i in range(sheet.nrows):
@@ -33,7 +33,7 @@ for i in range(sheet.nrows):
         print("开始解析HTML页面数据并存库")
         parse.page_source_parse(windows_list)
     except Exception as e:
-        with open(r"C:\Users\zengc\Desktop\error_company.txt", "a" , encoding='utf-8') as f:
+        with open(r"**********", "a" , encoding='utf-8') as f:
             f.write(company_name)
             f.write("\n")
         print("{}搜索异常".format(company_name))
