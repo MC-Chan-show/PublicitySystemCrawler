@@ -3,12 +3,12 @@ from fake_useragent import UserAgent
 import time, random, xlrd, datetime, signal
 
 
-init_url = "http://www.gsxt.gov.cn/SearchItemCaptcha"
-index_url = "http://www.gsxt.gov.cn/index.html"
-base_url = 'http://www.gsxt.gov.cn'
+init_url = "http://*************"
+index_url = "http://*************"
+base_url = 'http://*************'
 result_parse_rule = {'search_result_url': '//*[@id="advs"]/div/div[2]/a/@href'}
 max_click = 10
-chm_headers = ['Host="www.gsxt.gov.cn"',
+chm_headers = ['Host="********"',
                'Connection="keep-alive"',
                'User-Agent={}'.format(UserAgent().random),
                'Upgrade-Insecure-Requests=1',
@@ -16,7 +16,6 @@ chm_headers = ['Host="www.gsxt.gov.cn"',
                'Accept-Encoding="gzip, deflate"',
                'Accept-Language="zh-CN,zh;q=0.9"']
 search = PageUrlGet.CorpSearch(init_url, index_url, chm_headers, max_click)
-# book = xlrd.open_workbook(r"********")
 book = xlrd.open_workbook(r"************")
 sheet = book.sheet_by_index(0)
 num = 1
@@ -41,9 +40,6 @@ for i in range(sheet.nrows):
         continue
     print(str(datetime.datetime.now()) + f",{company_name}数据爬取完成")
     num = num + 1
-    # if num > 3:
-    #     print("已爬取{}家企业数据，爬虫结束！".format(num))
-    #     break
     time.sleep(random.randint(8, 15) / 10)
 
-print("共爬取{}家企业数据，爬虫结束！".format(num))
+print("共爬取{}数据，爬虫结束！".format(num))
